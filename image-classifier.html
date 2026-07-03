@@ -91,6 +91,9 @@
   button[disabled]{opacity:.5; cursor:not-allowed}
   .go{background:var(--signal); color:#fff; padding:11px 17px}
   .go:hover{background:var(--signal-deep)}
+  select.modelsel{font-family:"IBM Plex Sans",sans-serif; font-size:14px; padding:9px 10px;
+    border:1px solid var(--line); border-radius:9px; background:#FCFDFF; color:var(--ink); max-width:100%}
+  select.modelsel:focus{outline:2.5px solid var(--signal); outline-offset:2px}
   .sec{background:#EEF2F0; color:var(--ink); padding:10px 14px}
   .sec:hover{background:#E2E8E5}
   .sec.on{background:var(--signal); color:#fff}
@@ -210,7 +213,15 @@
     <p class="sub">Every label gets a score; here are the strongest. Read the <b>ranking and the gaps</b>, not just the top pick.</p>
     <div class="runrow">
       <button class="go" id="classify" type="button">Classify this image <span class="status" id="modelStatus"></span></button>
-      <div class="knob" style="flex:1 1 200px; min-width:200px; margin:0">
+      <div class="knob" style="flex:0 1 auto; margin:0">
+        <label for="model">Model</label>
+        <select id="model" class="modelsel">
+          <option value="Xenova/resnet-50">ResNet-50 · CNN · ~25 MB</option>
+          <option value="Xenova/convnext-tiny-224" selected>ConvNeXt-Tiny · CNN · ~30 MB (better)</option>
+          <option value="Xenova/vit-base-patch16-224">ViT-Base · Transformer · ~90 MB (most accurate)</option>
+        </select>
+      </div>
+      <div class="knob" style="flex:1 1 180px; min-width:180px; margin:0">
         <label for="topk">Show top <span class="val" id="topkVal">6</span> labels</label>
         <input type="range" id="topk" min="3" max="10" value="6" step="1">
       </div>
@@ -233,7 +244,7 @@
       <summary>Go deeper: what the CNN is actually doing</summary>
       <div class="deep-body">
         <p>The picture is first squashed to a fixed <b>224&times;224</b> grid of pixels, three numbers per pixel for red, green and blue. That grid of raw numbers is all the network ever gets, no labels, no caption, no context.</p>
-        <p>A <b>convolutional neural network</b> slides small <b>filters</b> across the image, each one a little pattern-detector. The earliest layers fire on edges and blobs of colour; stack more layers and they respond to corners, then textures, then whole parts, an eye, a wheel, a petal. This one, <b>ResNet-50</b>, is 50 layers deep. Nobody hand-wrote those filters; they were <b>learned</b> from about 1.2 million labelled photos (the ImageNet dataset).</p>
+        <p>A <b>convolutional neural network</b> slides small <b>filters</b> across the image, each one a little pattern-detector. The earliest layers fire on edges and blobs of colour; stack more layers and they respond to corners, then textures, then whole parts, an eye, a wheel, a petal. A classic one, <b>ResNet-50</b>, is 50 layers deep (a newer CNN like <b>ConvNeXt</b> is more accurate; you can switch models below Stage 3). Nobody hand-wrote those filters; they were <b>learned</b> from about 1.2 million labelled photos (the ImageNet dataset).</p>
         <p>At the very end the network produces one raw score, a <b>logit</b>, for each of its <b>1,000</b> possible labels. A step called <b>softmax</b> turns those scores into probabilities that add up to 100%. That is the ranked list you see, and it is why the model always answers <i>something</i>: even a picture of nothing it knows still gets a full distribution across those thousand words.</p>
         <p>This is exactly why the atmospheric photos are revealing. ImageNet was built from everyday web images, so it has a "volcano" and a "geyser" but nothing for an aurora, a cloud type or a satellite view of Earth. To recognise those you would <b>fine-tune</b> this same network, or train a new one, on labelled images from your own field. The architecture stays the same; only the training data and the set of labels change.</p>
         <p>Two things worth taking into the afternoon. First, the network has <b>no idea what it doesn't know</b>, its vocabulary is exactly those 1,000 labels and it cannot say "none of these". Second, it is only ever reporting <b>what's statistically likely given the pixels and its training</b>, which is exactly the move a language model makes with words. Confident and correct are not the same thing, here or there.</p>
@@ -242,7 +253,7 @@
   </section>
 
   <footer>
-    Runs a real convolutional network, <code>ResNet-50</code> (ImageNet-1k, 1,000 labels), downloaded once on first use, then cached.<br>
+    Runs a real image model in your browser — pick <code>ResNet-50</code>, <code>ConvNeXt</code> or <code>ViT-Base</code> (all ImageNet-1k, 1,000 labels). Downloaded once on first use, then cached.<br>
     Sample photos from Wikimedia Commons and NASA: Mount St. Helens (USGS), Old Faithful and Earth/cloud/aurora (NASA / US public domain), hot-air balloon and Airbus A380 (Wikimedia Commons, see each file for its licence). Nothing you load is sent anywhere.<br>
     Part of a short practical on machine learning &middot; the afternoon session covers language models and retrieval.
   </footer>
@@ -260,7 +271,15 @@ const $ = id => document.getElementById(id);
 const base = new Image();          // the currently loaded source image
 let baseReady = false;
 const T = { bright:100, blur:0, pix:0, rot:0, flip:false, gray:false };
-let classifier = null, modelState = 'idle';   // idle | loading | ready | error
+const MODELS = [
+  { id:'Xenova/resnet-50',           name:'ResNet-50',     kind:'CNN',         size:'~25 MB' },
+  { id:'Xenova/convnext-tiny-224',   name:'ConvNeXt-Tiny', kind:'CNN',         size:'~30 MB' },
+  { id:'Xenova/vit-base-patch16-224',name:'ViT-Base',      kind:'Transformer', size:'~90 MB' },
+];
+let curModel = 'Xenova/convnext-tiny-224';     // default: a stronger CNN than ResNet-50
+const pipes = {};                              // model id -> loaded pipeline (cached, so switching back is instant)
+let modelState = 'idle';                       // idle | loading | ready | error  (for the current model)
+const modelName = () => (MODELS.find(m => m.id === curModel) || {}).name || 'model';
 let busy = false, debounce = null;
 
 /* ---------- sample thumbnails ---------- */
@@ -392,12 +411,14 @@ function boxBlur(d, W, H, r){
 
 /* ---------- model ---------- */
 async function ensureModel(){
-  if (modelState === 'ready') return true;
+  if (pipes[curModel]) { modelState = 'ready'; return true; }
   if (modelState === 'loading') return false;
-  modelState = 'loading'; setStatus('downloading ResNet-50 (~25 MB, first time only)…', 'busy');
+  modelState = 'loading';
+  const m = MODELS.find(x => x.id === curModel);
+  setStatus(`downloading ${m.name} (${m.size}, first time only)…`, 'busy');
   try {
-    classifier = await pipeline('image-classification', 'Xenova/resnet-50');
-    modelState = 'ready'; setStatus('network ready', '');
+    pipes[curModel] = await pipeline('image-classification', curModel);
+    modelState = 'ready'; setStatus(`${m.name} ready`, '');
     return true;
   } catch (e){
     console.error(e);
@@ -424,10 +445,10 @@ async function classify(){
       pending = false;
       const k = +$('topk').value;
       const dataURL = canvas.toDataURL('image/jpeg', 0.92);   // always the current image
-      const out = await classifier(dataURL, { top_k: k });
+      const out = await pipes[curModel](dataURL, { top_k: k });
       renderResults(out);
     } while (pending);   // if the image/settings changed mid-inference, classify the latest
-    setStatus('network ready', '');
+    setStatus(modelName() + ' ready', '');
   } catch (e){
     console.error(e);
     $('cands').innerHTML = '<p class="empty">Something went wrong running the network. Try reloading the page.</p>';
@@ -442,6 +463,13 @@ function autoClassify(){
   debounce = setTimeout(classify, 380);
 }
 $('classify').addEventListener('click', classify);
+$('model').addEventListener('change', e => {
+  curModel = e.target.value;
+  modelState = pipes[curModel] ? 'ready' : 'idle';
+  const m = MODELS.find(x => x.id === curModel);
+  setStatus(pipes[curModel] ? m.name + ' ready' : `${m.name} — press Classify to load`, '');
+  classify();   // load the chosen model if needed, then re-run on the current image
+});
 
 /* ---------- results ---------- */
 function tidy(label){
