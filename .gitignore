@@ -1,0 +1,10 @@
+# macOS / editor junk
+.DS_Store
+~$*
+
+# Working & teaching extras — kept out of the public web-demo site
+*.pptx
+foundation-model.png
+ai-regulation-table.png
+ai-regulation-table.html
+ai-regulation-table.md

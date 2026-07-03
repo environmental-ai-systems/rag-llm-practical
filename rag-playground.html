@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Playground, chunk, embed, retrieve</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBFCFE;
+    --ink:#16202C;
+    --ink-soft:#566173;
+    --line:#E1E6EE;
+    --card:#FFFFFF;
+    --signal:#0E8C92;        /* relevance / retrieval accent */
+    --signal-deep:#0A6266;
+    --signal-wash:#E4F4F4;
+    --highlight:#FFE6A0;     /* matched-term marker */
+    --overlap:#EADBFB;       /* chunk overlap band */
+    --overlap-edge:#B98FE8;
+    --warm:#B8641A;          /* activity / "your turn" accent */
+    --warm-wash:#FBEEDD;
+    --warm-edge:#E9C79B;
+    --shadow:0 1px 2px rgba(22,32,44,.05), 0 6px 22px rgba(22,32,44,.06);
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    line-height:1.55; font-size:17px;
+    background-image:radial-gradient(var(--line) 1px, transparent 1px);
+    background-size:26px 26px; background-position:-13px -13px;
+  }
+  .wrap{max-width:980px; margin:0 auto; padding:40px 22px 96px}
+  header.top{margin-bottom:34px}
+  .kicker{font-family:"IBM Plex Mono",monospace; font-size:13px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--signal-deep); margin:0 0 10px}
+  h1{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:clamp(30px,5vw,46px);
+    line-height:1.04; letter-spacing:-.02em; margin:0 0 12px}
+  h1 .sig{color:var(--signal)}
+  .lede{font-size:18px; color:var(--ink-soft); max-width:64ch; margin:0}
+  .lede b{color:var(--ink); font-weight:600}
+
+  .stage{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    box-shadow:var(--shadow); padding:24px 24px 26px; margin:22px 0}
+  .stage-head{display:flex; align-items:baseline; gap:14px; margin-bottom:6px}
+  .step{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:15px;
+    color:#fff; background:var(--ink); width:30px; height:30px; flex:0 0 30px;
+    border-radius:8px; display:grid; place-items:center; line-height:1}
+  .stage h2{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:21px;
+    letter-spacing:-.01em; margin:0}
+  .stage .sub{color:var(--ink-soft); font-size:15px; margin:2px 0 18px 44px}
+
+  textarea{width:100%; min-height:150px; resize:vertical; padding:14px 15px;
+    font-family:"IBM Plex Mono",monospace; font-size:14.5px; line-height:1.6;
+    color:var(--ink); background:#FCFDFF; border:1px solid var(--line); border-radius:10px}
+  textarea:focus, input:focus, button:focus-visible{outline:2.5px solid var(--signal); outline-offset:2px}
+
+  .controls{display:flex; flex-wrap:wrap; gap:26px; align-items:flex-end; margin:18px 0 4px}
+  .ctrl{flex:1 1 220px; min-width:200px}
+  .ctrl label{display:flex; justify-content:space-between; font-size:14px; font-weight:600;
+    margin-bottom:8px}
+  .ctrl label .val{font-family:"IBM Plex Mono",monospace; color:var(--signal-deep)}
+  input[type=range]{width:100%; accent-color:var(--signal); height:22px}
+  .hint{font-size:13px; color:var(--ink-soft); margin-top:7px}
+
+  .chunkmeta{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink-soft);
+    margin:16px 0 10px}
+  .chunkmeta b{color:var(--ink)}
+  .chunks{display:flex; flex-direction:column; gap:12px}
+  .chunk{border:1px solid var(--line); border-left:4px solid var(--signal); border-radius:10px;
+    padding:12px 14px; background:#FCFDFF}
+  .chunk .tag{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--signal-deep);
+    text-transform:uppercase; letter-spacing:.08em; display:flex; justify-content:space-between;
+    margin-bottom:7px}
+  .chunk .body{font-size:15px; line-height:1.6}
+  .ov{background:var(--overlap); border-radius:3px; box-shadow:inset 0 -1px 0 var(--overlap-edge); padding:1px 1px}
+
+  .query-row{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px}
+  input[type=text]{flex:1 1 300px; padding:13px 15px; font-size:16px; border:1px solid var(--line);
+    border-radius:10px; background:#FCFDFF; color:var(--ink); font-family:inherit}
+  button{font-family:"Space Grotesk",sans-serif; font-weight:600; cursor:pointer; border:none;
+    border-radius:10px; font-size:15px; transition:transform .06s ease, background .15s ease}
+  button:active{transform:translateY(1px)}
+  .go{background:var(--signal); color:#fff; padding:13px 22px}
+  .go:hover{background:var(--signal-deep)}
+
+  .modes{display:inline-flex; background:#EEF2F7; border-radius:10px; padding:4px; margin-bottom:6px}
+  .modes button{background:transparent; color:var(--ink-soft); padding:9px 16px; font-size:14px}
+  .modes button.on{background:#fff; color:var(--ink); box-shadow:var(--shadow)}
+  .docpick{flex-wrap:wrap; max-width:100%}
+  .mode-note{font-size:13.5px; color:var(--ink-soft); margin:10px 0 16px}
+
+  .sample-q{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px}
+  .sample-q span{font-size:13px; color:var(--ink-soft); align-self:center; margin-right:2px}
+  .chip{background:var(--signal-wash); color:var(--signal-deep); border:1px solid #BFE3E3;
+    padding:7px 12px; border-radius:999px; font-size:13.5px; font-family:inherit; font-weight:500}
+  .chip:hover{background:#D5EDED}
+
+  .results{display:flex; flex-direction:column; gap:12px}
+  .res{border:1px solid var(--line); border-radius:11px; padding:13px 15px; background:#fff}
+  .res.top{border-color:var(--signal); box-shadow:0 0 0 2px var(--signal-wash)}
+  .res-head{display:flex; align-items:center; gap:12px; margin-bottom:9px}
+  .rank{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:14px; color:var(--ink-soft);
+    flex:0 0 auto}
+  .bar{flex:1 1 auto; height:9px; background:#EEF2F7; border-radius:999px; overflow:hidden}
+  .bar > i{display:block; height:100%; background:var(--signal); border-radius:999px; width:0;
+    transition:width .5s cubic-bezier(.2,.7,.2,1)}
+  .score{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--signal-deep);
+    flex:0 0 auto; min-width:52px; text-align:right}
+  .res .text{font-size:15px; line-height:1.6}
+  mark{background:var(--highlight); color:inherit; border-radius:3px; padding:0 2px}
+
+  .insight{border-left:4px solid var(--signal); background:var(--signal-wash); border-radius:0 10px 10px 0;
+    padding:14px 16px; margin-top:16px; font-size:15px}
+  .insight b{color:var(--signal-deep)}
+
+  .status{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink-soft); margin-left:10px}
+  .status.busy{color:var(--signal-deep)}
+  .status.err{color:#B23A48}
+
+  footer{margin-top:30px; font-size:13.5px; color:var(--ink-soft); text-align:center; line-height:1.7}
+  footer code{background:#EEF2F7; padding:2px 6px; border-radius:5px; font-size:12.5px}
+  .empty{color:var(--ink-soft); font-style:italic; font-size:15px}
+
+  /* ---- activity ("your turn") callout ---- */
+  .activity{border-left:4px solid var(--warm); background:var(--warm-wash);
+    border-radius:0 10px 10px 0; padding:13px 16px 15px; margin-top:16px; font-size:15px}
+  .activity .lab{font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--warm); font-weight:600; display:block; margin-bottom:6px}
+  .activity b{color:var(--ink)}
+  .activity ol{margin:8px 0 0; padding-left:20px}
+  .activity li{margin:4px 0}
+
+  /* ---- token inspector ---- */
+  .subpanel{border:1px dashed var(--line); border-radius:12px; padding:16px 16px 18px;
+    margin-top:20px; background:#FCFDFF}
+  .subpanel h3{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:16px;
+    margin:0 0 4px; letter-spacing:-.01em}
+  .subpanel .sub2{color:var(--ink-soft); font-size:14.5px; margin:0 0 14px}
+  .tok-row{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px}
+  .tok-row input{flex:1 1 280px}
+  .tok-run{background:var(--ink); color:#fff; padding:12px 18px}
+  .tok-run:hover{background:#000}
+  .tokwrap{display:flex; flex-wrap:wrap; gap:5px; align-items:center; min-height:34px}
+  .tok{font-family:"IBM Plex Mono",monospace; font-size:14px; padding:4px 7px; border-radius:6px;
+    white-space:pre; border:1px solid rgba(22,32,44,.10); cursor:default}
+  .tok.c0{background:#E4F4F4} .tok.c1{background:#FBEEDD} .tok.c2{background:#EADBFB}
+  .tok.c3{background:#FFF0D6} .tok.c4{background:#E6F0FB} .tok.c5{background:#F3E7EF}
+  .tokcount{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink-soft); margin-top:12px}
+  .tokcount b{color:var(--signal-deep)}
+
+  /* ---- repository / metadata stage ---- */
+  .facets{display:flex; flex-direction:column; gap:16px; margin:6px 0 18px}
+  .facet > .flab{display:block; font-size:14px; font-weight:600; margin-bottom:9px}
+  .facet .flab .val{font-family:"IBM Plex Mono",monospace; color:var(--signal-deep); font-weight:500}
+  .facet-chips{display:flex; flex-wrap:wrap; gap:8px}
+  .chip.on{background:var(--signal); color:#fff; border-color:var(--signal)}
+  .chip.on:hover{background:var(--signal-deep)}
+  .yearrow{display:flex; align-items:center; gap:14px}
+  .yearrow input[type=range]{flex:1 1 auto; max-width:340px}
+  .repo-results{display:flex; flex-direction:column; gap:12px}
+  .doc{border:1px solid var(--line); border-radius:11px; padding:14px 16px; background:#fff}
+  .doc.top{border-color:var(--signal); box-shadow:0 0 0 2px var(--signal-wash)}
+  .doc .title{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:16.5px;
+    line-height:1.3; margin:0 0 6px; letter-spacing:-.01em}
+  .doc .byline{font-size:13.5px; color:var(--ink-soft); margin-bottom:9px}
+  .doc .abstract{font-size:14.5px; line-height:1.55; margin:0 0 11px}
+  .doc .metarow{display:flex; align-items:center; flex-wrap:wrap; gap:7px}
+  .badge{font-family:"IBM Plex Mono",monospace; font-size:11.5px; text-transform:uppercase;
+    letter-spacing:.06em; padding:3px 8px; border-radius:6px; background:#EEF2F7; color:var(--ink-soft)}
+  .badge.type{background:var(--ink); color:#fff}
+  .badge.tag{background:var(--signal-wash); color:var(--signal-deep); border:1px solid #BFE3E3}
+  .badge.tag.hit{background:var(--highlight); color:var(--ink); border-color:#E9C77A}
+  .doc .relbar{display:flex; align-items:center; gap:10px; margin-top:11px}
+  .doc .relbar .bar{max-width:220px}
+  .repo-count{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink-soft); margin:0 0 12px}
+  .repo-count b{color:var(--ink)}
+
+  /* ---- Stage 4: synthetic note + labelled zones ---- */
+  .note{font-size:13.5px; line-height:1.5; color:var(--ink-soft); background:#FFF8EC;
+    border:1px solid var(--warm-edge); border-radius:9px; padding:10px 13px; margin:0 0 22px}
+  .note b{color:var(--warm)}
+  .zone{margin:0 0 22px}
+  .zone-lab{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:15.5px;
+    margin:0 0 5px; display:flex; align-items:center; gap:10px; letter-spacing:-.01em}
+  .zone-lab .k{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.1em;
+    text-transform:uppercase; padding:3px 8px; border-radius:6px; font-weight:500}
+  .zone-lab .k.exact{background:var(--ink); color:#fff}
+  .zone-lab .k.fuzzy{background:var(--signal); color:#fff}
+  .zone-help{font-size:14px; color:var(--ink-soft); margin:0 0 15px; max-width:66ch}
+  .zone-help b{color:var(--ink)}
+
+  /* ---- collapsible "go deeper" reference panels ---- */
+  details.deep{border:1px solid var(--line); border-radius:12px; background:#fff; margin-top:18px}
+  details.deep > summary{cursor:pointer; list-style:none; padding:14px 16px;
+    font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:15.5px;
+    display:flex; align-items:center; gap:11px; letter-spacing:-.01em}
+  details.deep > summary::-webkit-details-marker{display:none}
+  details.deep > summary::before{content:"\25B8"; font-family:"IBM Plex Mono",monospace; color:var(--signal);
+    font-weight:700; font-size:15px; width:15px; text-align:center; line-height:1}
+  details.deep[open] > summary::before{content:"\25BE"}
+  details.deep > summary:hover{color:var(--signal-deep)}
+  details.deep .deep-body{padding:2px 16px 16px; font-size:15px; line-height:1.6; border-top:1px solid var(--line)}
+  details.deep .deep-body p{margin:13px 0}
+  details.deep .deep-body b{color:var(--ink)}
+  details.deep .deep-body code{background:#EEF2F7; padding:2px 6px; border-radius:5px; font-size:13px}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <p class="kicker">How retrieval-augmented generation finds the right text</p>
+    <h1>RAG <span class="sig">Playground</span></h1>
+    <p class="lede">Watch a document get split into <b>chunks</b>, then ask a question and see which chunks a system <b>retrieves</b>, by keyword, or by <b>meaning</b>. Everything runs in your browser. No API, no login, no data leaves this tab.</p>
+  </header>
+
+  <!-- STAGE 1 -->
+  <section class="stage">
+    <div class="stage-head"><span class="step">1</span><h2>The document</h2></div>
+    <p class="sub">A model can't read a whole library at once, so we start with a source text. Pick an example below, edit it, or paste your own.</p>
+    <div class="modes docpick" id="docPick" role="tablist" aria-label="Source document" style="margin-bottom:16px"></div>
+    <textarea id="corpus" spellcheck="false"></textarea>
+  </section>
+
+  <!-- STAGE 2 -->
+  <section class="stage">
+    <div class="stage-head"><span class="step">2</span><h2>Chunk it</h2></div>
+    <p class="sub">Long text is cut into smaller passages. <b>Overlap</b> repeats a few units at the seams so an idea isn't sliced in half. Drag the sliders and watch the chunks change.</p>
+    <div class="modes" role="tablist" aria-label="Chunk unit" style="margin-bottom:16px">
+      <button id="uWords" class="on" role="tab" aria-selected="true">Words</button>
+      <button id="uTokens" role="tab" aria-selected="false">Tokens <span class="status" id="tokStatus"></span></button>
+    </div>
+    <div class="controls">
+      <div class="ctrl">
+        <label>Chunk size <span class="val"><span id="sizeVal">30</span> <span id="unitLabel1">words</span></span></label>
+        <input type="range" id="size" min="10" max="80" value="30" step="2">
+      </div>
+      <div class="ctrl">
+        <label>Overlap <span class="val"><span id="ovVal">6</span> <span id="unitLabel2">words</span></span></label>
+        <input type="range" id="overlap" min="0" max="30" value="6" step="1">
+      </div>
+    </div>
+    <p class="hint">Words are easy to eyeball; switch to <b>Tokens</b> to chunk the way real systems actually do (same GPT-4 / cl100k tokenizer as <code style="font-size:12.5px">tiktokenizer.vercel.app</code>). Notice the count changes, tokens ≠ words. The lilac band marks text shared with the previous chunk.</p>
+    <div class="chunkmeta" id="chunkMeta"></div>
+    <div class="chunks" id="chunks"></div>
+
+    <details class="deep">
+      <summary>Go deeper: how real systems decide where to cut</summary>
+      <div class="deep-body">
+        <p>This demo uses the bluntest method there is, a <b>fixed-size sliding window</b> that cuts every N units regardless of meaning, which is exactly why it will happily slice a sentence in half. It's the easiest to reason about, so it's a good place to start.</p>
+        <p><b>Structure-aware splitting</b> does better by cutting on natural boundaries, paragraphs, sentences, or Markdown headings, so each chunk is a coherent unit. A <b>recursive</b> splitter tries the largest boundary first (paragraphs), then falls back to smaller ones (sentences, then words) only when a piece is still too long.</p>
+        <p><b>Semantic chunking</b> goes further still: it embeds each sentence and starts a new chunk wherever the topic shifts. Slower to build, but the boundaries land where the meaning actually changes.</p>
+        <p><b>The size trade-off is the real lesson.</b> Small chunks retrieve precisely (a hit points at the exact relevant sentence) but each carries little surrounding context, and one answer can end up scattered across several. Large chunks carry more context but retrieve less precisely (you drag in unrelated text) and dilute the embedding, because a single vector now has to stand for many ideas at once.</p>
+        <p><b>Overlap</b> is cheap insurance that an idea straddling a boundary survives whole in at least one chunk, paid for in duplicated text and extra vectors to store and search. A common starting point is a few hundred tokens per chunk with roughly 10 to 20% overlap, then tuned against your own documents and the questions people actually ask. There is no universal best setting.</p>
+      </div>
+    </details>
+
+    <div class="subpanel">
+      <h3>Peek inside: what actually is a token?</h3>
+      <p class="sub2">A token isn't a word and it isn't a letter, it's a <b>subword piece</b> from a fixed vocabulary of about 100,000 fragments (GPT-4 uses the set called <code>cl100k</code>). Common words are usually a single token; rarer or longer words get split into several; and the leading space, capital letters, and punctuation all count. Two reasons this matters: a model's <b>context window</b> and its <b>price</b> are both measured in tokens, not words, and chunking by tokens is how real systems make sure a chunk actually fits. Type anything below and watch it break apart.</p>
+      <div class="tok-row">
+        <input type="text" id="tokInput" value="Tokenization isn't always intuitive: antidisestablishmentarianism 🌫️" spellcheck="false">
+        <button class="tok-run" id="tokRun">Break into tokens</button>
+      </div>
+      <div class="tokwrap" id="tokChips"><span class="empty">Press the button to see the pieces. Each coloured box is one token; <code style="font-size:12px">␣</code> marks a leading space.</span></div>
+      <div class="tokcount" id="tokCount"></div>
+    </div>
+
+    <details class="deep">
+      <summary>Go deeper: why the token count matters</summary>
+      <div class="deep-body">
+        <p><b>Everything shares one budget.</b> A model reads and writes in tokens, and its <b>context window</b> is a fixed number of them. The instructions, the chunks you retrieved, the question, and the model's own answer all have to fit inside that budget at once. Chunking exists largely so you can spend it well.</p>
+        <p><b>Cost is measured the same way.</b> Model pricing is per token, so chunk size multiplied by how many chunks you retrieve is a direct lever on both speed and bill.</p>
+        <p><b>Rough conversions for English prose:</b> about 4 characters, or 0.75 words, per token. Code, long numbers, URLs, and non-English scripts usually cost more tokens for the same amount of text, worth remembering if your documents aren't plain English.</p>
+        <p><b>What the inspector reveals</b> that a word count hides: a leading space belongs to the token, so the same word with and without a space in front tokenises differently; capitalisation changes the tokens; and a rare or misspelled word can shatter into several pieces.</p>
+      </div>
+    </details>
+
+    <div class="activity">
+      <span class="lab">Your turn</span>
+      Set <b>Overlap</b> to <b>0</b> and skim the chunk boundaries. Can you find a sentence that gets sliced across two chunks so neither half makes sense on its own? Now raise the overlap until that idea sits <b>whole</b> inside one chunk. That's the entire reason overlap exists, and in the token inspector above, try to find one everyday word that costs <b>three or more tokens</b> (a name, a technical term, or a word with a typo usually does it).
+    </div>
+  </section>
+
+  <!-- STAGE 3 -->
+  <section class="stage">
+    <div class="stage-head"><span class="step">3</span><h2>Retrieve</h2></div>
+    <p class="sub">Ask a question. The system scores every chunk for relevance and brings back the best matches. This is the text that would be handed to the LLM to answer from.</p>
+
+    <div class="modes" role="tablist" aria-label="Retrieval method">
+      <button id="mKeyword" class="on" role="tab" aria-selected="true">Keyword match</button>
+      <button id="mSemantic" role="tab" aria-selected="false">Semantic <span class="status" id="modelStatus"></span></button>
+    </div>
+    <p class="mode-note" id="modeNote">Keyword match (TF-IDF) ranks chunks by the words they share with your question. Simple and transparent, but blind to meaning: ask in different words and it can miss the answer.</p>
+
+    <div class="sample-q" id="sampleQ"></div>
+
+    <div class="query-row">
+      <input type="text" id="query" placeholder="Ask a question about the document…" value="Why does city air make people cough?">
+      <button class="go" id="run">Retrieve</button>
+    </div>
+
+    <div class="results" id="results"><p class="empty">Results will appear here.</p></div>
+    <div id="insightSlot"></div>
+    <p class="hint" style="margin-top:14px">The number on each result is its <b>relevance score</b>, higher means a closer match, and the bar draws that score relative to the top hit. What the number actually is:</p>
+
+    <details class="deep">
+      <summary>Go deeper: what exactly is that score?</summary>
+      <div class="deep-body">
+        <p><b>In keyword mode</b> the score is a <b>cosine similarity</b> between two bags of words: your question and the chunk. Each word is weighted <b>up</b> if it's rare across the chunks (so it's distinctive, like "asthma") and <b>down</b> if it's common (like "the", which is dropped entirely). The score runs from <b>0</b>, no important words in common, to <b>1</b>, the same weighted words in the same proportions. Sharing one rare, on-topic word moves it far more than sharing several everyday ones. This weighting scheme is called <b>TF-IDF</b>.</p>
+        <p><b>In semantic mode</b> it's the same cosine idea, but comparing the 384-number <i>meaning</i> vectors instead of word counts. Worth knowing: even an excellent semantic match usually scores well below 1, often 0.3 to 0.6. Each embedding captures many facets of a passage at once, its topic, but also its tone, its particular words, its structure, and two passages rarely line up on every one, so a perfect 1.0 is rare. Read the <b>ranking and the gaps between scores</b>, rather than the absolute figure.</p>
+        <p><b>The bar is just a picture of the number.</b> Each result's bar is drawn as a proportion of the top hit, so the best match is always full. It shows relative confidence <i>within this one search</i>, it isn't an absolute grade, and you can't compare a bar here against a bar from a different question.</p>
+        <p>Stage 4's repository search reuses the very same keyword score, measured over each document's title and abstract.</p>
+      </div>
+    </details>
+
+    <details class="deep">
+      <summary>Go deeper: what a semantic embedding actually is</summary>
+      <div class="deep-body">
+        <p>An embedding turns a piece of text into a list of numbers, here <b>384</b> of them, placed so that texts with similar <b>meaning</b> sit near each other, even when they share no words. The model learned those positions from enormous amounts of text: "cough" and "respiratory symptom" land close together because they tend to appear in similar contexts.</p>
+        <p>Closeness is measured by <b>cosine similarity</b>, essentially the angle between two vectors. Because the vectors here are normalised, that's simply their dot product, and a score of 1.0 means they point in exactly the same direction.</p>
+        <p>This is why semantic search can find the right passage when the wording is completely different from the question. It's also why it can occasionally return something <b>topically close but not actually an answer</b>, it matches meaning, not truth. That failure mode, confidently handing back something related but wrong, is worth watching out for.</p>
+      </div>
+    </details>
+
+    <div class="activity">
+      <span class="lab">Your turn</span>
+      Stay in <b>Keyword match</b> and ask the loaded document a question <b>without reusing its words</b>, swap in synonyms for what the text says (in the air-pollution example, try "breathe" instead of "lungs", or "car fumes" instead of "traffic"). Watch the score collapse or the search miss entirely. Now flip to <b>Semantic</b> and ask the exact same thing. What comes back, and why? Then try the reverse: find a question where keyword actually wins because the wording matches precisely.
+    </div>
+  </section>
+
+  <!-- STAGE 4 -->
+  <section class="stage">
+    <div class="stage-head"><span class="step">4</span><h2>Search a repository</h2></div>
+    <p class="sub">Everything so far searched <i>inside one document</i>. But real systems search across a whole <b>repository</b>, many documents, each carrying structured <b>metadata</b>: who wrote it, when, what kind of thing it is, what it's about. There are two very different ways to narrow it down, and telling them apart is the whole point of this stage.</p>
+
+    <p class="note"><b>Heads up: this repository is fake.</b> The nine titles, authors and dates below are invented, so the demo stays self-contained and runs with no internet. None of them are real papers, so please don't cite them.</p>
+
+    <div class="zone">
+      <p class="zone-lab">Filter by metadata <span class="k exact">Exact · on/off</span></p>
+      <p class="zone-help">These are <b>switches, not searches</b>. Click a tag or type and a document is <b>kept only if it matches</b>, a tag is either present or it isn't. Filters never rank anything; they simply keep documents or remove them. Matching tags light up on the cards below so you can see why each one survived.</p>
+      <div class="facets">
+        <div class="facet">
+          <span class="flab">Type</span>
+          <div class="facet-chips" id="typeChips"></div>
+        </div>
+        <div class="facet">
+          <span class="flab">Tags</span>
+          <div class="facet-chips" id="tagChips"></div>
+        </div>
+        <div class="facet">
+          <span class="flab">Published from <span class="val" id="yearVal">2018</span> onward</span>
+          <div class="yearrow">
+            <input type="range" id="repoYear" min="2018" max="2024" value="2018" step="1">
+            <button class="chip" id="repoClear" style="border-color:var(--line)">Clear all filters</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="zone">
+      <p class="zone-lab">Search the text <span class="k fuzzy">Fuzzy · ranked</span></p>
+      <p class="zone-help">This box is the <b>opposite kind of matching</b>. Type words and every surviving document is <b>scored and ranked</b> by how well its title and abstract match, with the matched words <mark>highlighted</mark>. It doesn't remove documents, it orders them. The number is the same <b>0 to 1 relevance score</b> explained back in Stage 3. Leave it empty to browse by filters alone.</p>
+      <div class="query-row">
+        <input type="text" id="repoQuery" placeholder="e.g. models, asthma, sensors… (optional)" value="">
+        <button class="go" id="repoRun">Search</button>
+      </div>
+    </div>
+
+    <p class="repo-count" id="repoCount"></p>
+    <div class="repo-results" id="repoResults"></div>
+    <div id="repoInsightSlot"></div>
+
+    <div class="activity">
+      <span class="lab">Your turn</span>
+      <ol>
+        <li><b>Filters only.</b> Using the switches above, find every <b>dataset</b> published <b>after 2020</b> that's tagged <b>sensors</b>. How many survive? (Notice the tag lights up on each one.)</li>
+        <li><b>Search only.</b> Clear the filters, then type <b>models</b> in the search box. Now the documents come back <i>ranked</i>, with a relevance bar and highlighted words, nothing was removed, just reordered. That's the difference: a filter <b>keeps or drops</b>, a search <b>scores and sorts</b>.</li>
+        <li><b>Both together.</b> Filter to <b>Journal article</b>, then search <b>sensors</b>. Metadata narrowed the field; relevance ordered what was left. Finally, stack filters until you hit <b>zero results</b>, and say why over-filtering a real repository is a genuine risk.</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer>
+    Self-contained teaching demo · keyword &amp; metadata search work offline · semantic mode loads a small embedding model
+    (<code>all-MiniLM-L6-v2</code>, ~25&nbsp;MB) the first time, then caches it.<br>
+    Host it anywhere static (GitHub Pages) or just open the file, same result on any laptop.
+  </footer>
+</div>
+
+<script type="module">
+import { pipeline, env, AutoTokenizer } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0';
+
+/* ---------- document library (each carries its own sample questions) ---------- */
+const LIBRARY = [
+{ name:"Air pollution",
+  questions:["Why does city air make people cough?","How do trees help with pollution?","What can governments do about smog?"],
+  text:`Urban air pollution comes mainly from road traffic, industry, and the burning of fuels for heat and power. Diesel engines and construction sites are among the largest local contributors in dense city centres.
+
+Fine particulate matter, often written as PM2.5, is made of microscopic particles small enough to slip past the body's natural defences. Once inhaled, these particles penetrate deep into the lungs and can trigger inflammation, leaving sensitive people short of breath and prone to a persistent dry cough.
+
+Children, older adults, and anyone with asthma or heart disease are far more vulnerable to dirty air. Long-term exposure is linked to reduced lung development in the young and to higher rates of cardiovascular and respiratory illness across a population.
+
+Vegetation can ease the problem. Street trees and green walls capture particles on their leaves and absorb gases such as nitrogen dioxide, while also cooling the surrounding streets. A well-placed canopy measurably lowers pollutant concentrations at pavement level.
+
+Policy levers make the biggest difference at scale. Low-emission zones that charge or ban the most polluting vehicles, investment in cycling and public transport, and tighter limits on industrial emissions have all cut concentrations in cities that adopted them.
+
+Monitoring underpins everything else. Networks of reference-grade analysers and low-cost sensors track concentrations across a city in near real time, letting authorities issue health warnings and check whether their interventions are actually working.` },
+
+{ name:"Heatwaves",
+  questions:["Why are cities hotter than the countryside?","Who is most at risk during a heatwave?","How does heat make air pollution worse?"],
+  text:`A heatwave is a prolonged spell of unusually hot weather, typically several days when temperatures sit well above the seasonal average for a place. What counts as extreme is relative: a summer that feels ordinary in one country can be dangerous in another that is not built or prepared for it.
+
+Cities feel the heat more sharply than the countryside around them. Dark roofs, asphalt, and concrete soak up sunlight through the day and release it slowly after dark, so built-up areas stay warm long into the night. This effect, known as the urban heat island, can leave a city several degrees hotter than nearby rural land.
+
+Heat is dangerous because the body struggles to cool itself. When it cannot shed heat fast enough, core temperature climbs, leading to dehydration, heat exhaustion, and in severe cases heatstroke. The strain also falls on the heart and kidneys, which is why deaths during a heatwave often rise from cardiovascular causes rather than heat alone.
+
+The people most at risk are older adults, infants, outdoor workers, and anyone with a chronic illness or little access to cooling. Those living alone or high up in buildings without ventilation are especially exposed, and warm nights that bring no relief are often deadlier than hot days.
+
+Heat and air pollution frequently arrive together and make each other worse. Strong sunlight and stagnant hot air help form ground-level ozone, a lung irritant, while heat-driven wildfires can blanket whole regions in fine particulate smoke. Breathing polluted air while the body is already under heat stress compounds the danger.
+
+Cities can adapt in practical ways. Planting trees and shaded green space cools the streets, reflective "cool roofs" bounce sunlight away, and public cooling centres give vulnerable people somewhere to shelter. Early-warning systems that forecast dangerous heat let authorities open those centres and check on residents before the worst arrives.` },
+
+{ name:"Caffeine & sleep",
+  questions:["Why does coffee keep me awake?","How long does caffeine stay in the body?","Why do some people handle caffeine better than others?"],
+  text:`Caffeine is the most widely used stimulant in the world, found in coffee, tea, chocolate, and many soft and energy drinks. A morning cup feels harmless, but the chemistry behind it explains why a late one can wreck a night's sleep.
+
+As the day goes on, a molecule called adenosine builds up in the brain and makes you feel steadily more tired. Caffeine works by blocking the receptors that adenosine would normally lock onto, so the tiredness signal never gets through and you feel alert, even though the adenosine is still there, waiting.
+
+The catch is that caffeine lingers. Its half-life is roughly five to six hours, meaning half of an afternoon coffee can still be circulating at bedtime. For some people that is enough to delay sleep, cut the deep restorative stages, and leave them groggy the next morning.
+
+People vary a great deal in how they handle it. Genetics, age, pregnancy, and regular use all change how quickly the body clears caffeine, which is why one person can drink espresso after dinner and sleep soundly while another is kept awake by a single cup at lunch.
+
+Tolerance builds with daily use, so habitual drinkers feel less of a kick and may need more for the same effect. Stopping abruptly can trigger withdrawal (headaches, irritability, and fatigue) for a day or two while the brain readjusts.
+
+Better sleep usually starts with timing rather than going without. Keeping caffeine to the earlier part of the day, and giving the body several hours to clear it before bed, lets natural adenosine do its job when it is finally time to sleep.` }
+];
+
+/* ---------- state ---------- */
+let chunks = [];
+let chunkVecs = null;       // semantic vectors for current chunks
+let extractor = null;       // transformers.js embedding pipeline
+let modelState = 'idle';    // idle | loading | ready | error
+let mode = 'keyword';
+let unit = 'words';         // words | tokens
+let tokenizer = null;       // transformers.js tokenizer (cl100k)
+let tokState = 'idle';
+let corpusTokIds = null;    // cached token ids for current corpus
+
+const $ = id => document.getElementById(id);
+const corpusEl = $('corpus');
+corpusEl.value = LIBRARY[0].text;
+let docIndex = 0;
+
+/* ---------- text helpers ---------- */
+const STOP = new Set('a an and are as at be by for from has have in is it its of on or that the to was were will with this these those into can do does how what why when which who whom about across also their them they you your'.split(' '));
+function words(t){ return t.trim().split(/\s+/).filter(Boolean); }
+function tokens(t){ return (t.toLowerCase().match(/[a-z0-9]+/g) || []).filter(w => !STOP.has(w)); }
+function esc(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+/* ---------- 2. chunking (words or tokens) ---------- */
+function computeCorpusTokens(){
+  if (!tokenizer) { corpusTokIds = null; return; }
+  corpusTokIds = tokenizer.encode(corpusEl.value, { add_special_tokens:false });
+}
+
+function buildChunks(){
+  const size = +$('size').value;
+  const ov = Math.min(+$('overlap').value, size - 1);
+  const stride = Math.max(1, size - ov);
+  chunks = [];
+
+  if (unit === 'tokens' && tokenizer && corpusTokIds){
+    const ids = corpusTokIds;
+    for (let i = 0; i < ids.length; i += stride){
+      const span = ids.slice(i, i + size);
+      const ovc = i === 0 ? 0 : Math.min(ov, span.length);
+      chunks.push({
+        count: span.length,
+        text: tokenizer.decode(span, { skip_special_tokens:true }).trim(),
+        head: ovc ? tokenizer.decode(span.slice(0, ovc), { skip_special_tokens:true }).trim() : '',
+        rest: tokenizer.decode(span.slice(ovc), { skip_special_tokens:true }).trim(),
+        overlapCount: ovc
+      });
+      if (i + size >= ids.length) break;
+    }
+  } else {
+    const w = words(corpusEl.value);
+    for (let i = 0; i < w.length; i += stride){
+      const slice = w.slice(i, i + size);
+      const ovc = i === 0 ? 0 : Math.min(ov, slice.length);
+      chunks.push({
+        count: slice.length,
+        text: slice.join(' '),
+        head: slice.slice(0, ovc).join(' '),
+        rest: slice.slice(ovc).join(' '),
+        overlapCount: ovc
+      });
+      if (i + size >= w.length) break;
+    }
+  }
+  chunkVecs = null;                 // chunks changed → semantic cache invalid
+  renderChunks();
+}
+
+function renderChunks(){
+  const host = $('chunks');
+  const noun = unit === 'tokens' ? 'tokens' : 'words';
+  const total = unit === 'tokens' ? (corpusTokIds ? corpusTokIds.length : 0) : words(corpusEl.value).length;
+  $('chunkMeta').innerHTML = chunks.length
+    ? `<b>${total}</b> ${noun} → <b>${chunks.length}</b> chunks · each up to <b>${$('size').value}</b> ${noun} · <b>${$('overlap').value}</b>-${noun.slice(0,-1)} overlap`
+    : '';
+  if (!chunks.length){ host.innerHTML = '<p class="empty">Add some text above.</p>'; return; }
+  host.innerHTML = chunks.map((c,i) => {
+    const bodyHtml = c.overlapCount ? `<span class="ov">${esc(c.head)}</span> ${esc(c.rest)}` : esc(c.text);
+    return `<div class="chunk"><div class="tag"><span>Chunk ${i+1}</span><span>${c.count} ${noun}</span></div><div class="body">${bodyHtml}</div></div>`;
+  }).join('');
+}
+
+/* ---------- tokenizer loader + unit switch ---------- */
+async function ensureTokenizer(){
+  if (tokState === 'ready') return true;
+  if (tokState === 'loading') return false;
+  tokState = 'loading'; setTokStatus('loading tokenizer…','busy');
+  try{
+    env.allowLocalModels = false;
+    tokenizer = await AutoTokenizer.from_pretrained('Xenova/gpt-4');
+    tokState = 'ready'; setTokStatus('cl100k','');
+    return true;
+  }catch(e){
+    tokState = 'error'; setTokStatus('needs internet','err');
+    return false;
+  }
+}
+async function setUnit(u){
+  if (u === 'tokens'){
+    const ok = await ensureTokenizer();
+    if (!ok){ return; }           // stay on words if it can't load
+    computeCorpusTokens();
+  }
+  unit = u;
+  $('uWords').classList.toggle('on', u==='words');
+  $('uTokens').classList.toggle('on', u==='tokens');
+  $('uWords').setAttribute('aria-selected', u==='words');
+  $('uTokens').setAttribute('aria-selected', u==='tokens');
+  $('unitLabel1').textContent = u;
+  $('unitLabel2').textContent = u;
+  buildChunks();
+  run();
+}
+function setTokStatus(t,cls){ const s=$('tokStatus'); s.textContent = t?('· '+t):''; s.className = 'status '+(cls||''); }
+
+/* ---------- 3a. keyword retrieval (TF-IDF + cosine) ---------- */
+function tfidfRank(query){
+  const docTokens = chunks.map(c => tokens(c.text));
+  const N = docTokens.length;
+  const df = {};
+  docTokens.forEach(toks => new Set(toks).forEach(t => df[t] = (df[t]||0)+1));
+  const idf = t => Math.log((N + 1) / ((df[t]||0) + 1)) + 1;
+  const vec = toks => {
+    const tf = {}; toks.forEach(t => tf[t] = (tf[t]||0)+1);
+    const v = {}; let n = 0;
+    for (const t in tf){ const x = (tf[t]/toks.length) * idf(t); v[t]=x; n += x*x; }
+    n = Math.sqrt(n) || 1; for (const t in v) v[t] /= n; return v;
+  };
+  const qtoks = tokens(query);
+  const qv = vec(qtoks);
+  const qset = new Set(qtoks);
+  return chunks.map((c,i) => {
+    const dv = vec(docTokens[i]);
+    let s = 0; for (const t in qv) if (dv[t]) s += qv[t]*dv[t];
+    const matched = [...new Set(docTokens[i].filter(t => qset.has(t)))];
+    return { i, score: s, matched };
+  }).sort((a,b) => b.score - a.score);
+}
+
+/* ---------- 3b. semantic retrieval (embeddings) ---------- */
+async function ensureModel(){
+  if (modelState === 'ready') return true;
+  if (modelState === 'loading') return false;
+  modelState = 'loading'; setStatus('loading model…','busy');
+  try{
+    env.allowLocalModels = false;
+    extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    modelState = 'ready'; setStatus('model ready','');
+    return true;
+  }catch(e){
+    modelState = 'error';
+    setStatus('couldn\u2019t load, open in a browser tab with internet','err');
+    return false;
+  }
+}
+async function embed(text){
+  const out = await extractor(text, { pooling:'mean', normalize:true });
+  return Array.from(out.data);
+}
+function dot(a,b){ let s=0; for (let i=0;i<a.length;i++) s += a[i]*b[i]; return s; }
+
+async function semanticRank(query){
+  if (!chunkVecs){
+    setStatus('embedding chunks…','busy');
+    chunkVecs = [];
+    for (const c of chunks) chunkVecs.push(await embed(c.text));
+    setStatus('model ready','');
+  }
+  const qv = await embed(query);
+  const qset = new Set(tokens(query));
+  return chunks.map((c,i) => ({
+    i,
+    score: dot(qv, chunkVecs[i]),                     // cosine (vectors normalized)
+    matched: [...new Set(tokens(c.text).filter(t => qset.has(t)))]
+  })).sort((a,b) => b.score - a.score);
+}
+
+/* ---------- rendering results ---------- */
+function highlight(text, matched){
+  if (mode !== 'keyword' || !matched.length) return esc(text);
+  const re = new RegExp('\\b(' + matched.map(m => m.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\b','gi');
+  return esc(text).replace(re, '<mark>$&</mark>');
+}
+function renderResults(ranked, query){
+  const host = $('results');
+  const shown = ranked.filter(r => r.score > 0.0001).slice(0,3);
+  const top = shown.length ? shown : ranked.slice(0,1);
+  if (!top.length || (mode==='keyword' && top[0].score<=0.0001)){
+    host.innerHTML = '<p class="empty">No chunk shares any words with that question. Switch to <b>Semantic</b> to match by meaning instead.</p>';
+    $('insightSlot').innerHTML=''; return;
+  }
+  const max = top[0].score || 1;
+  host.innerHTML = top.map((r,rank) => {
+    const c = chunks[r.i];
+    return `<div class="res ${rank===0?'top':''}">
+      <div class="res-head">
+        <span class="rank">#${rank+1} · Chunk ${r.i+1}</span>
+        <span class="bar"><i style="width:${Math.max(4,(r.score/max)*100)}%"></i></span>
+        <span class="score">${r.score.toFixed(3)}</span>
+      </div>
+      <div class="text">${highlight(c.text, r.matched)}</div>
+    </div>`;
+  }).join('');
+
+  // teaching insight
+  let msg = '';
+  const best = top[0];
+  if (mode === 'semantic' && best.matched.length === 0){
+    msg = `<b>That's the point of embeddings.</b> The top chunk shares <b>no words</b> with your question, keyword search would have missed it. It was retrieved because its <i>meaning</i> is close to the question in vector space.`;
+  } else if (mode === 'keyword'){
+    msg = `Highlighted words are the overlap driving the score. Rephrase the question with synonyms and watch good chunks drop, that's the weakness <b>semantic</b> retrieval fixes.`;
+  } else {
+    msg = `Each chunk and the question became a 384-number vector; the score is their <b>cosine similarity</b>. Higher = closer in meaning.`;
+  }
+  $('insightSlot').innerHTML = `<div class="insight">${msg}</div>`;
+}
+
+/* ---------- run ---------- */
+async function run(){
+  const q = $('query').value.trim();
+  if (!chunks.length || !q) return;
+  if (mode === 'keyword'){
+    renderResults(tfidfRank(q), q);
+  } else {
+    const ok = await ensureModel();
+    if (!ok){ $('results').innerHTML = '<p class="empty">Semantic mode needs the embedding model. If it won\u2019t load here, open this file in a normal browser tab connected to the internet (it caches after the first load).</p>'; return; }
+    $('run').textContent = 'Working…';
+    renderResults(await semanticRank(q), q);
+    $('run').textContent = 'Retrieve';
+  }
+}
+
+/* ---------- wiring ---------- */
+function setStatus(t,cls){ const s=$('modelStatus'); s.textContent = t?('· '+t):''; s.className = 'status '+(cls||''); }
+function setMode(m){
+  mode = m;
+  $('mKeyword').classList.toggle('on', m==='keyword');
+  $('mSemantic').classList.toggle('on', m==='semantic');
+  $('mKeyword').setAttribute('aria-selected', m==='keyword');
+  $('mSemantic').setAttribute('aria-selected', m==='semantic');
+  $('modeNote').innerHTML = m==='keyword'
+    ? `Keyword match (TF-IDF) ranks chunks by the words they share with your question. Simple and transparent, but blind to meaning: ask in different words and it can miss the answer.`
+    : `Semantic match turns every chunk and your question into a vector of numbers that captures meaning, then ranks by closeness. It can find the right passage even with <b>no shared words</b>.`;
+}
+
+$('size').addEventListener('input', e => { $('sizeVal').textContent = e.target.value;
+  if (+$('overlap').value >= +e.target.value){ $('overlap').value = +e.target.value-2; $('ovVal').textContent=$('overlap').value; }
+  $('overlap').max = Math.max(0, +e.target.value-2); buildChunks(); });
+$('overlap').addEventListener('input', e => { $('ovVal').textContent = e.target.value; buildChunks(); });
+corpusEl.addEventListener('input', () => { if (unit==='tokens') computeCorpusTokens(); buildChunks(); });
+$('uWords').addEventListener('click', () => setUnit('words'));
+$('uTokens').addEventListener('click', () => setUnit('tokens'));
+$('run').addEventListener('click', run);
+$('query').addEventListener('keydown', e => { if (e.key==='Enter') run(); });
+$('mKeyword').addEventListener('click', () => { setMode('keyword'); run(); });
+$('mSemantic').addEventListener('click', () => { setMode('semantic'); run(); });
+
+/* ================= document picker ================= */
+function renderSampleQs(){
+  $('sampleQ').innerHTML = '<span>Try:</span>' +
+    LIBRARY[docIndex].questions.map(q => `<button class="chip">${esc(q)}</button>`).join('');
+}
+function buildDocPicker(){
+  $('docPick').innerHTML = LIBRARY.map((d,i) =>
+    `<button role="tab" class="${i===0?'on':''}" aria-selected="${i===0}">${esc(d.name)}</button>`).join('');
+  $('docPick').querySelectorAll('button').forEach((b,i) => b.addEventListener('click', () => loadDoc(i)));
+}
+function loadDoc(i){
+  docIndex = i;
+  corpusEl.value = LIBRARY[i].text;
+  $('docPick').querySelectorAll('button').forEach((b,j) => {
+    b.classList.toggle('on', j===i); b.setAttribute('aria-selected', j===i);
+  });
+  renderSampleQs();
+  if (unit === 'tokens') computeCorpusTokens();
+  chunkVecs = null;
+  buildChunks();
+  $('query').value = LIBRARY[i].questions[0];
+  run();
+}
+// clicking an example question fills the box and runs (delegated, survives re-render)
+$('sampleQ').addEventListener('click', e => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  $('query').value = b.textContent; run();
+});
+
+buildDocPicker();
+renderSampleQs();
+$('query').value = LIBRARY[0].questions[0];
+
+/* ================= token inspector ================= */
+async function renderTokenBreakdown(){
+  const text = $('tokInput').value;
+  const host = $('tokChips');
+  if (!text.trim()){ host.innerHTML = '<span class="empty">Type something above first.</span>'; $('tokCount').textContent=''; return; }
+  const ok = await ensureTokenizer();
+  if (!ok){ host.innerHTML = '<span class="empty">The tokenizer downloads on first use, open this in a browser tab with internet, then try again.</span>'; return; }
+  const ids = tokenizer.encode(text, { add_special_tokens:false });
+  host.innerHTML = ids.map((id,i) => {
+    let piece = tokenizer.decode([id], { skip_special_tokens:true });
+    let shown = esc(piece).replace(/ /g,'\u2423').replace(/\n/g,'\u23CE');
+    if (shown === '') shown = '\u2205';
+    return `<span class="tok c${i%6}" title="token #${id}">${shown}</span>`;
+  }).join('');
+  const chars = [...text].length;
+  $('tokCount').innerHTML = `<b>${ids.length}</b> token${ids.length!==1?'s':''} · <b>${chars}</b> character${chars!==1?'s':''} · about <b>${(chars/ids.length).toFixed(1)}</b> characters per token`;
+}
+$('tokRun').addEventListener('click', renderTokenBreakdown);
+$('tokInput').addEventListener('keydown', e => { if (e.key==='Enter') renderTokenBreakdown(); });
+$('tokInput').addEventListener('input', () => { if (tokState==='ready') renderTokenBreakdown(); });
+
+/* ================= 4. repository / metadata search ================= */
+const REPO = [
+  { title:"Traffic-Related PM2.5 and Childhood Asthma in Urban Cohorts", authors:"Okafor & Lindqvist", year:2021, type:"Journal article", tags:["health","PM2.5","children"], abstract:"A five-city cohort study linking roadside fine-particulate exposure to raised asthma incidence in children under twelve." },
+  { title:"Low-Cost Sensor Network for Neighbourhood Air Monitoring", authors:"Ramírez, Chen & Patel", year:2023, type:"Dataset", tags:["sensors","monitoring","open-data"], abstract:"Hourly PM2.5 and NO2 readings from 140 low-cost sensors across a mid-sized European city, calibrated against reference stations." },
+  { title:"Do Low-Emission Zones Work? Evidence from Twelve Cities", authors:"Bianchi & Adeyemi", year:2022, type:"Report", tags:["policy","traffic","evaluation"], abstract:"A cross-city evaluation finding measurable NO2 reductions where low-emission zones were enforced, with weaker effects on PM2.5." },
+  { title:"Street Trees as Particulate Sinks: A Meta-Analysis", authors:"Novak", year:2019, type:"Journal article", tags:["vegetation","PM2.5","green-infrastructure"], abstract:"Synthesises forty studies on how urban canopy captures particulates, quantifying deposition by leaf type and street geometry." },
+  { title:"Calibrating Low-Cost NO2 Sensors with Machine Learning", authors:"Haddad & Osei", year:2024, type:"Journal article", tags:["sensors","machine-learning","NO2"], abstract:"Gradient-boosted models correct drift in cheap electrochemical sensors, halving error against reference-grade analysers." },
+  { title:"Cardiovascular Mortality and Long-Term Pollution Exposure", authors:"Sato & Whitmore", year:2018, type:"Journal article", tags:["health","mortality","long-term"], abstract:"A twenty-year population study associating chronic PM2.5 exposure with elevated cardiovascular death rates." },
+  { title:"Open Urban Air-Quality Dataset, 2015 to 2023", authors:"City Environmental Agency", year:2023, type:"Dataset", tags:["open-data","monitoring","PM2.5","NO2"], abstract:"Nine years of daily reference-grade measurements for twenty pollutants across a metropolitan monitoring network." },
+  { title:"Policy Brief: Cycling Infrastructure and Roadside Emissions", authors:"Ward", year:2020, type:"Policy brief", tags:["policy","transport","cycling"], abstract:"Argues that protected cycle networks shift short car trips and modestly lower roadside emissions, with cost estimates." },
+  { title:"Deep Learning for Short-Term PM2.5 Forecasting", authors:"Zhang & Oduya", year:2022, type:"Thesis", tags:["machine-learning","forecasting","PM2.5"], abstract:"A master's thesis comparing LSTM and transformer models for predicting next-day particulate peaks from sensor and weather data." }
+];
+const REPO_TYPES = ["Journal article","Report","Dataset","Policy brief","Thesis"];
+const REPO_TAGS = [...new Set(REPO.flatMap(d => d.tags))].sort();
+const repoTypeSel = new Set();
+const repoTagSel = new Set();
+
+// pre-tokenise title+abstract once for relevance scoring
+const REPO_TOKS = REPO.map(d => tokens(d.title + ' ' + d.abstract));
+const REPO_DF = {};
+REPO_TOKS.forEach(ts => new Set(ts).forEach(t => REPO_DF[t] = (REPO_DF[t]||0)+1));
+const repoIdf = t => Math.log((REPO.length + 1) / ((REPO_DF[t]||0) + 1)) + 1;
+
+// normalised TF-IDF vector, so the score becomes a cosine similarity (0 to 1), same measure as Stage 3
+function repoVec(toks){
+  const tf = {}; toks.forEach(t => tf[t] = (tf[t]||0)+1);
+  const v = {}; let n = 0;
+  for (const t in tf){ const x = (tf[t]/toks.length) * repoIdf(t); v[t] = x; n += x*x; }
+  n = Math.sqrt(n) || 1; for (const t in v) v[t] /= n; return v;
+}
+const REPO_VECS = REPO_TOKS.map(repoVec);
+
+function repoScore(i, qvec, qset){
+  if (!qset.size) return { score:0, matched:[] };
+  const dv = REPO_VECS[i];
+  let s = 0; for (const t in qvec) if (dv[t]) s += qvec[t] * dv[t];
+  const matched = [...new Set(REPO_TOKS[i].filter(t => qset.has(t)))];
+  return { score:s, matched };
+}
+
+function buildFacetChips(){
+  $('typeChips').innerHTML = REPO_TYPES.map(t => `<button class="chip" data-type="${t}">${t}</button>`).join('');
+  $('tagChips').innerHTML = REPO_TAGS.map(t => `<button class="chip" data-tag="${t}">${t}</button>`).join('');
+  $('typeChips').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
+    const t = b.dataset.type; repoTypeSel.has(t) ? repoTypeSel.delete(t) : repoTypeSel.add(t);
+    b.classList.toggle('on'); applyRepoFilters();
+  }));
+  $('tagChips').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
+    const t = b.dataset.tag; repoTagSel.has(t) ? repoTagSel.delete(t) : repoTagSel.add(t);
+    b.classList.toggle('on'); applyRepoFilters();
+  }));
+}
+
+function applyRepoFilters(){
+  const query = $('repoQuery').value.trim();
+  const q = tokens(query);
+  const qset = new Set(q);
+  const qvec = repoVec(q);
+  const yearFrom = +$('repoYear').value;
+  const rows = REPO
+    .map((d,i) => ({ d, i, ...repoScore(i, qvec, qset) }))
+    .filter(r => r.d.year >= yearFrom
+      && (!repoTypeSel.size || repoTypeSel.has(r.d.type))
+      && (!repoTagSel.size || r.d.tags.some(t => repoTagSel.has(t))));
+  if (query) rows.sort((a,b) => b.score - a.score || b.d.year - a.d.year);
+  else rows.sort((a,b) => b.d.year - a.d.year);
+  renderRepo(rows, query, qset.size > 0);
+}
+
+function repoHighlight(text, matched){
+  if (!matched.length) return esc(text);
+  const re = new RegExp('\\b(' + matched.map(m => m.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\b','gi');
+  return esc(text).replace(re, '<mark>$&</mark>');
+}
+
+function renderRepo(rows, query, scored){
+  const host = $('repoResults');
+  const filtersOn = repoTypeSel.size || repoTagSel.size || +$('repoYear').value > 2018 || query;
+  $('repoCount').innerHTML = `<b>${rows.length}</b> of <b>${REPO.length}</b> documents match` + (filtersOn ? ' the current filters' : ', no filters applied yet');
+  if (!rows.length){
+    host.innerHTML = '<p class="empty">Nothing matches every filter at once. Loosen one, that\u2019s over-filtering, and it happens in real repositories too.</p>';
+    $('repoInsightSlot').innerHTML = ''; return;
+  }
+  const max = scored ? (rows[0].score || 1) : 1;
+  host.innerHTML = rows.map((r,idx) => {
+    const d = r.d;
+    const rel = scored && r.score > 0.0001
+      ? `<div class="relbar"><span class="score">${r.score.toFixed(2)}</span><span class="bar"><i style="width:${Math.max(6,(r.score/max)*100)}%"></i></span></div>`
+      : '';
+    const tags = d.tags.map(t => {
+      const hit = repoTagSel.has(t);
+      return `<span class="badge tag${hit ? ' hit' : ''}">${t}</span>`;
+    }).join('');
+    return `<div class="doc ${scored && idx===0 && r.score>0.0001 ? 'top' : ''}">
+      <p class="title">${repoHighlight(d.title, r.matched)}</p>
+      <p class="byline">${esc(d.authors)} · ${d.year}</p>
+      <p class="abstract">${repoHighlight(d.abstract, r.matched)}</p>
+      <div class="metarow"><span class="badge type">${d.type}</span>${tags}</div>
+      ${rel}
+    </div>`;
+  }).join('');
+
+  let msg;
+  if (scored){
+    msg = `Two <b>different kinds of matching</b> are happening. The filters are <b>exact and structured</b>, a paper either is a dataset published after 2020 or it isn't, like a <code>WHERE</code> clause in a database. The text query is <b>fuzzy and ranked</b>, exactly like Stages 2 to 3. Production RAG combines them: metadata <b>narrows the field</b>, relevance <b>orders what's left</b>. This is usually called <b>hybrid</b> or <b>metadata-filtered</b> retrieval.`;
+  } else {
+    msg = `Right now you're filtering on <b>metadata only</b>, no text relevance, so results are just sorted newest-first. Add a word to the search box to layer <b>fuzzy relevance</b> on top of the <b>exact filters</b>. That combination is how a real system searches a whole repository.`;
+  }
+  $('repoInsightSlot').innerHTML = `<div class="insight">${msg}</div>`;
+}
+
+$('repoRun').addEventListener('click', applyRepoFilters);
+$('repoQuery').addEventListener('keydown', e => { if (e.key==='Enter') applyRepoFilters(); });
+$('repoQuery').addEventListener('input', applyRepoFilters);
+$('repoYear').addEventListener('input', e => { $('yearVal').textContent = e.target.value; applyRepoFilters(); });
+$('repoClear').addEventListener('click', () => {
+  repoTypeSel.clear(); repoTagSel.clear();
+  document.querySelectorAll('#typeChips .chip, #tagChips .chip').forEach(c => c.classList.remove('on'));
+  $('repoQuery').value = ''; $('repoYear').value = 2018; $('yearVal').textContent = '2018';
+  applyRepoFilters();
+});
+buildFacetChips();
+applyRepoFilters();
+
+buildChunks();
+run();
+</script>
+</body>
+</html>

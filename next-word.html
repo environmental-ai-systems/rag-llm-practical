@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Next-token predictor, a toy LLM in your browser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBFCFE;
+    --ink:#16202C;
+    --ink-soft:#566173;
+    --line:#E1E6EE;
+    --card:#FFFFFF;
+    --signal:#5B57D1;        /* prediction / probability accent */
+    --signal-deep:#3D39A6;
+    --signal-wash:#ECEBFB;
+    --signal-rgb:91,87,209;
+    --highlight:#FFE6A0;
+    --warm:#B8641A;          /* activity accent */
+    --warm-wash:#FBEEDD;
+    --warm-edge:#E9C79B;
+    --shadow:0 1px 2px rgba(22,32,44,.05), 0 6px 22px rgba(22,32,44,.06);
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    line-height:1.55; font-size:17px;
+    background-image:radial-gradient(var(--line) 1px, transparent 1px);
+    background-size:26px 26px; background-position:-13px -13px;
+  }
+  .wrap{max-width:980px; margin:0 auto; padding:40px 22px 96px}
+  header.top{margin-bottom:34px}
+  .kicker{font-family:"IBM Plex Mono",monospace; font-size:13px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--signal-deep); margin:0 0 10px}
+  h1{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:clamp(30px,5vw,46px);
+    line-height:1.04; letter-spacing:-.02em; margin:0 0 12px}
+  h1 .sig{color:var(--signal)}
+  .lede{font-size:18px; color:var(--ink-soft); max-width:64ch; margin:0}
+  .lede b{color:var(--ink); font-weight:600}
+
+  .stage{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    box-shadow:var(--shadow); padding:24px 24px 26px; margin:22px 0}
+  .stage-head{display:flex; align-items:baseline; gap:14px; margin-bottom:6px}
+  .step{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:15px;
+    color:#fff; background:var(--ink); width:30px; height:30px; flex:0 0 30px;
+    border-radius:8px; display:grid; place-items:center; line-height:1}
+  .stage h2{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:21px;
+    letter-spacing:-.01em; margin:0}
+  .stage .sub{color:var(--ink-soft); font-size:15px; margin:2px 0 18px 44px}
+
+  textarea{width:100%; min-height:92px; resize:vertical; padding:14px 15px;
+    font-family:"IBM Plex Mono",monospace; font-size:15px; line-height:1.6;
+    color:var(--ink); background:#FCFDFF; border:1px solid var(--line); border-radius:10px}
+  textarea:focus, input:focus, button:focus-visible{outline:2.5px solid var(--signal); outline-offset:2px}
+
+  .sample-q{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px}
+  .sample-q span{font-size:13px; color:var(--ink-soft); align-self:center; margin-right:2px}
+  .chip{background:var(--signal-wash); color:var(--signal-deep); border:1px solid #CFCEF3;
+    padding:7px 12px; border-radius:999px; font-size:13.5px; font-family:inherit; font-weight:500; cursor:pointer}
+  .chip:hover{background:#E0DEF8}
+
+  .hint{font-size:13px; color:var(--ink-soft); margin-top:10px}
+  .hint b{color:var(--ink)}
+
+  /* token view */
+  .tokwrap{display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-top:14px}
+  .tok{font-family:"IBM Plex Mono",monospace; font-size:13.5px; padding:4px 7px; border-radius:6px;
+    white-space:pre; border:1px solid rgba(22,32,44,.10); background:#F4F3FC}
+
+  /* running text panel */
+  .running{border:1px solid var(--line); background:#FCFDFF; border-radius:10px;
+    padding:15px 16px; font-size:16px; line-height:1.9; min-height:56px;
+    overflow-wrap:anywhere; word-break:break-word}
+  .running .ptext{font-family:"IBM Plex Sans",sans-serif}
+  .gtok{font-family:"IBM Plex Mono",monospace; font-size:14px; white-space:pre-wrap; border-radius:5px;
+    padding:2px 4px; margin:0 1px; color:var(--ink);
+    background:rgba(var(--signal-rgb), var(--a,.3)); box-shadow:inset 0 0 0 1px rgba(var(--signal-rgb),.18)}
+  .cursor{display:inline-block; width:2px; height:1.05em; background:var(--signal); vertical-align:-2px;
+    margin-left:2px; animation:blink 1.1s steps(2,start) infinite}
+  @keyframes blink{to{opacity:0}}
+
+  /* control row */
+  .ctrls{display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; margin:18px 0 4px}
+  .tempbox{flex:1 1 240px; min-width:220px}
+  .tempbox label{display:flex; justify-content:space-between; font-size:14px; font-weight:600; margin-bottom:8px}
+  .tempbox label .val{font-family:"IBM Plex Mono",monospace; color:var(--signal-deep)}
+  input[type=range]{width:100%; accent-color:var(--signal); height:22px}
+  .btns{display:flex; flex-wrap:wrap; gap:9px}
+  button{font-family:"Space Grotesk",sans-serif; font-weight:600; cursor:pointer; border:none;
+    border-radius:10px; font-size:14.5px; transition:transform .06s ease, background .15s ease}
+  button:active{transform:translateY(1px)}
+  button[disabled]{opacity:.5; cursor:not-allowed}
+  .go{background:var(--signal); color:#fff; padding:11px 17px}
+  .go:hover{background:var(--signal-deep)}
+  .sec{background:#EEF0F7; color:var(--ink); padding:11px 15px}
+  .sec:hover{background:#E3E6F1}
+
+  .status{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink-soft); margin-left:2px}
+  .status.busy{color:var(--signal-deep)} .status.err{color:#B23A48}
+
+  /* candidate distribution */
+  .candhead{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:15px; margin:22px 0 10px}
+  .cands{display:flex; flex-direction:column; gap:7px}
+  .cand{display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:#fff;
+    border:1px solid var(--line); border-radius:10px; padding:9px 12px; cursor:pointer}
+  .cand:hover{border-color:var(--signal); background:#FCFCFE}
+  .cand.top{border-color:var(--signal); box-shadow:0 0 0 2px var(--signal-wash)}
+  .cand .ctok{font-family:"IBM Plex Mono",monospace; font-size:14px; white-space:pre;
+    background:#F4F3FC; border-radius:5px; padding:3px 7px; flex:0 0 auto; min-width:64px; text-align:center}
+  .cand .bar{flex:1 1 auto; height:9px; background:#EEF0F7; border-radius:999px; overflow:hidden}
+  .cand .bar > i{display:block; height:100%; background:var(--signal); border-radius:999px; width:0;
+    transition:width .35s cubic-bezier(.2,.7,.2,1)}
+  .cand .cp{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--signal-deep);
+    flex:0 0 auto; min-width:56px; text-align:right}
+  .cand .add{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-soft); flex:0 0 auto}
+
+  .insight{border-left:4px solid var(--signal); background:var(--signal-wash); border-radius:0 10px 10px 0;
+    padding:14px 16px; margin-top:16px; font-size:15px}
+  .insight b{color:var(--signal-deep)}
+
+  .activity{border-left:4px solid var(--warm); background:var(--warm-wash);
+    border-radius:0 10px 10px 0; padding:13px 16px 15px; margin-top:16px; font-size:15px}
+  .activity .lab{font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--warm); font-weight:600; display:block; margin-bottom:6px}
+  .activity b{color:var(--ink)}
+  .activity ol{margin:8px 0 0; padding-left:20px}
+  .activity li{margin:5px 0}
+
+  details.deep{border:1px solid var(--line); border-radius:12px; background:#fff; margin-top:18px}
+  details.deep > summary{cursor:pointer; list-style:none; padding:14px 16px;
+    font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:15.5px;
+    display:flex; align-items:center; gap:11px; letter-spacing:-.01em}
+  details.deep > summary::-webkit-details-marker{display:none}
+  details.deep > summary::before{content:"\25B8"; font-family:"IBM Plex Mono",monospace; color:var(--signal);
+    font-weight:700; font-size:15px; width:15px; text-align:center; line-height:1}
+  details.deep[open] > summary::before{content:"\25BE"}
+  details.deep > summary:hover{color:var(--signal-deep)}
+  details.deep .deep-body{padding:2px 16px 16px; font-size:15px; line-height:1.6; border-top:1px solid var(--line)}
+  details.deep .deep-body p{margin:13px 0}
+  details.deep .deep-body b{color:var(--ink)}
+  details.deep .deep-body code{background:#EEF0F7; padding:2px 6px; border-radius:5px; font-size:13px}
+
+  .empty{color:var(--ink-soft); font-style:italic; font-size:15px}
+  footer{margin-top:30px; font-size:13.5px; color:var(--ink-soft); text-align:center; line-height:1.7}
+  footer code{background:#EEF0F7; padding:2px 6px; border-radius:5px; font-size:12.5px}
+  footer a{color:var(--signal-deep)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <p class="kicker">What a language model is really doing</p>
+    <h1>Guess the <span class="sig">next token</span></h1>
+    <p class="lede">Type a few words and watch a real, if tiny, language model predict what comes next: not one answer, but a <b>spread of probabilities</b> over its whole vocabulary. Keep going and it writes, one token at a time. It all runs in your browser; nothing you type leaves this tab.</p>
+  </header>
+
+  <!-- STAGE 1 -->
+  <section class="stage">
+    <div class="stage-head"><span class="step">1</span><h2>The prompt</h2></div>
+    <p class="sub">A language model only ever sees a sequence of <b>tokens</b>, and it answers one question: what token is likely to come next? Give it a few words to start from.</p>
+    <div class="sample-q" id="presets"></div>
+    <textarea id="prompt" spellcheck="false">The weather today is</textarea>
+    <div class="tokwrap" id="promptToks"></div>
+    <p class="hint">Those coloured boxes are how the model sees your text, subword <b>tokens</b>, not whole words. <code>&#9251;</code> marks a leading space.</p>
+  </section>
+
+  <!-- STAGE 2 -->
+  <section class="stage">
+    <div class="stage-head"><span class="step">2</span><h2>Predict, then generate</h2></div>
+    <p class="sub">Here's the model's answer: the most likely next tokens, each with a probability. Pick one yourself, or let the model choose, and it becomes part of the text. Then the same question repeats. That loop <i>is</i> generation.</p>
+
+    <div class="running" id="running"></div>
+
+    <div class="ctrls">
+      <div class="tempbox">
+        <label>Temperature <span class="val" id="tempVal">1.0</span></label>
+        <input type="range" id="temp" min="0.1" max="1.5" value="1.0" step="0.1">
+      </div>
+      <div class="btns">
+        <button class="go" id="predict">Predict next token <span class="status" id="modelStatus"></span></button>
+        <button class="sec" id="addTop" title="Always take the single highest-probability token (greedy)">Add most likely</button>
+        <button class="sec" id="addSample" title="Pick a token at random, weighted by its probability (what real generation does)">Add a sample</button>
+        <button class="sec" id="write" title="Repeat 'Add a sample' 15 times">Auto-write &times;15</button>
+        <button class="sec" id="reset">Reset</button>
+      </div>
+    </div>
+    <p class="hint"><b>Add most likely</b> always takes the top-ranked token, the safe, predictable choice (this is called <b>greedy</b>). <b>Add a sample</b> instead picks one at random, weighted by the probabilities, so likelier tokens are chosen more often but surprises can slip in; this is what real text generation does, and it's what the temperature dial controls. <b>Auto-write</b> just repeats "Add a sample" fifteen times.</p>
+    <p class="hint" id="tokLine"></p>
+
+    <p class="candhead">Most likely next tokens</p>
+    <div class="cands" id="cands"><p class="empty">Press <b>Predict next token</b> to load the model and see its guess.</p></div>
+
+    <div class="insight" id="insightSlot" style="display:none"></div>
+
+    <details class="deep">
+      <summary>Go deeper: where those percentages come from</summary>
+      <div class="deep-body">
+        <p>For every position, the model produces one raw score, a <b>logit</b>, for each of the roughly <b>50,000</b> tokens it knows. On their own those numbers don't mean much; they can be any size, positive or negative.</p>
+        <p>A step called <b>softmax</b> squashes the whole list into probabilities: it exponentiates each score and divides by the total, so they all land between 0 and 1 and add up to exactly 1. That's the distribution you see, the bars are just its top ten, out of tens of thousands.</p>
+        <p><b>Temperature</b> is a dial applied before softmax. Turn it down and the gap between scores is exaggerated, so the top token dominates and output turns predictable. Turn it up and the scores flatten toward each other, so unlikely tokens get a real chance and the text gets more surprising, and less reliable.</p>
+        <p>To actually write, the model picks one token from this distribution, the single most likely (<b>greedy</b>), or a random <b>sample</b> weighted by probability, sticks it on the end, and runs the whole thing again. Repeating that is called <b>autoregressive</b> generation.</p>
+      </div>
+    </details>
+
+    <details class="deep">
+      <summary>Go deeper: why it repeats itself</summary>
+      <div class="deep-body">
+        <p>Feed it "The weather today is" and you may get something like "<i>a bit of a surprise. The weather is a bit of a surprise. The weather is…</i>" It loops. That is expected, and worth understanding.</p>
+        <p>The model answers one question at a time: <b>what token is most likely next?</b> Nothing in it remembers "I already said that", and nothing rewards it for being fresh. With <b>Add most likely</b> (or a low temperature) it takes the safest token every single step. The catch: once it drifts into a phrase it finds probable, the safest continuation is the token that keeps that phrase going, which leads straight back into the same phrase. It's a self-reinforcing rut, and a tiny, old model like <b>distilGPT-2</b> falls into it easily.</p>
+        <p>You can feel the mechanism by breaking the loop two ways. Raise the <b>temperature</b> and switch to <b>Add a sample</b>: now lower-ranked tokens get a real chance, so it occasionally steps off the well-worn path (at the cost of coherence). Real systems go further, adding a <b>repetition penalty</b> that deliberately lowers the score of tokens used recently, plus <b>top-k / top-p</b> sampling that trims the long tail of junk options. distilGPT-2 here has none of that, so you are seeing raw next-token prediction with the guard-rails off.</p>
+      </div>
+    </details>
+
+    <details class="deep">
+      <summary>Go deeper: why it can sound confident and still be wrong</summary>
+      <div class="deep-body">
+        <p>Notice the model is only ever predicting what's <b>likely to come next</b>, based on patterns in the text it was trained on. It has no notion of what's true, no memory of a specific source, and no way to look anything up. Fluent and correct are two different things.</p>
+        <p>The one here is <b>distilGPT-2</b> (small, old, and trained on a slice of the 2019 web), so its mistakes are easy to see, which is exactly why it's useful for a demo. Bigger modern models are far more fluent, but the underlying move is identical: predict a plausible next token. That's the root of what people call <b>hallucination</b>.</p>
+        <p>So how do you get a model to answer from <i>your</i> documents rather than its vague memory of the internet? You fetch the right text and hand it to the model to work from. That's <b>retrieval</b>, and it's the subject of the next demo.</p>
+      </div>
+    </details>
+
+    <div class="activity">
+      <span class="lab">Your turn</span>
+      <ol>
+        <li><b>The temperature dial.</b> Set temperature to <b>0.2</b> and hit <b>Auto-write</b>, watch it turn safe and repetitive, often looping. Push it to <b>1.4</b> and try again, wilder, and less coherent. Low temperature is predictable; high is creative but unstable.</li>
+        <li><b>Context is everything.</b> Type "The capital of France is" and note the top token. Change <b>France</b> to <b>Japan</b> and predict again. Same model, different context, the only thing it has to go on is the tokens in front of it.</li>
+        <li><b>Sure vs guessing.</b> Find a prompt where the top token is above <b>80%</b> (the model is almost certain) and one where the best is under <b>20%</b> (it's basically guessing). What kind of text makes it confident?</li>
+        <li><b>The gap retrieval fills.</b> Start it with "PM2.5 harms the lungs because" and let it write. It produces something fluent that may or may not be right, because it's predicting plausible words, not looking anything up. Hold that thought for the retrieval demo.</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer>
+    Runs a real model, <code>distilGPT-2</code> (82M parameters, ~50&nbsp;MB), downloaded once on first use, then cached. Keyboard accessible; nothing you type is sent anywhere.<br>
+    Part of a short practical on language models and retrieval.
+  </footer>
+</div>
+
+<script type="module">
+import { env, AutoTokenizer, AutoModelForCausalLM } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0';
+
+const $ = id => document.getElementById(id);
+const promptEl = $('prompt');
+const K = 10;
+
+const PRESETS = [
+  "The weather today is",
+  "Once upon a time, there was a",
+  "The capital of France is",
+  "My favourite food is"
+];
+
+/* ---------- state ---------- */
+let tokenizer = null, model = null;
+let modelState = 'idle';              // idle | loading | ready | error
+let generated = [];                   // [{piece, p}] tokens the model has written
+let busy = false;
+let debounce = null;
+
+/* ---------- helpers ---------- */
+function esc(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function showSpaces(s){ return esc(s).replace(/ /g,'\u2423').replace(/\n/g,'\u23CE'); }
+function currentText(){ return promptEl.value + generated.map(g => g.piece).join(''); }
+function setStatus(t, cls){ const s=$('modelStatus'); s.textContent = t?('\u00b7 '+t):''; s.className='status '+(cls||''); }
+function setBusy(b){
+  busy = b;
+  ['predict','addTop','addSample','write','reset'].forEach(id => $(id).disabled = b);
+}
+
+/* ---------- presets + prompt tokens ---------- */
+function renderPresets(){
+  $('presets').innerHTML = '<span>Try:</span>' +
+    PRESETS.map(p => `<button class="chip">${esc(p)}</button>`).join('');
+}
+$('presets').addEventListener('click', e => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  promptEl.value = b.textContent; generated = [];
+  renderPromptToks(); renderRunning(); if (modelState==='ready') predict();
+});
+
+async function renderPromptToks(){
+  const host = $('promptToks');
+  const text = promptEl.value;
+  if (!text.trim()){ host.innerHTML=''; return; }
+  if (!tokenizer){ host.innerHTML='<span class="empty">loading tokenizer…</span>'; return; }
+  const ids = tokenizer.encode(text, { add_special_tokens:false });
+  host.innerHTML = ids.map(id => {
+    const piece = tokenizer.decode([id], { skip_special_tokens:true });
+    return `<span class="tok">${showSpaces(piece) || '\u2205'}</span>`;
+  }).join('');
+}
+
+/* ---------- running text ---------- */
+function renderRunning(){
+  const host = $('running');
+  const prompt = promptEl.value ? `<span class="ptext">${esc(promptEl.value)}</span>` : '<span class="empty">Type a prompt above.</span>';
+  const gen = generated.map(g => {
+    const a = Math.max(0.14, Math.min(1, g.p)).toFixed(2);
+    return `<span class="gtok" style="--a:${a}" title="${(g.p*100).toFixed(1)}% likely">${showSpaces(g.piece)}</span>`;
+  }).join('');
+  host.innerHTML = prompt + gen + '<span class="cursor"></span>';
+}
+
+/* ---------- tokenizer (loads eagerly so the coloured tokens show right away) ---------- */
+async function ensureTokenizer(){
+  if (tokenizer) return;
+  try{
+    env.allowLocalModels = false;
+    tokenizer = await AutoTokenizer.from_pretrained('Xenova/distilgpt2');
+    renderPromptToks();
+  }catch(e){ console.error(e); /* stays blank; the full model load will retry */ }
+}
+
+/* ---------- model ---------- */
+async function ensureModel(){
+  if (modelState === 'ready') return true;
+  if (modelState === 'loading') return false;
+  modelState = 'loading'; setStatus('downloading distilGPT-2 (~50 MB, first time only)…','busy');
+  try{
+    env.allowLocalModels = false;
+    if (!tokenizer) tokenizer = await AutoTokenizer.from_pretrained('Xenova/distilgpt2');
+    model = await AutoModelForCausalLM.from_pretrained('Xenova/distilgpt2');
+    modelState = 'ready'; setStatus('model ready','');
+    renderPromptToks();
+    return true;
+  }catch(e){
+    modelState = 'error'; setStatus('couldn\u2019t load, needs internet on first use','err');
+    console.error(e);
+    return false;
+  }
+}
+
+/* forward pass -> temperature-scaled distribution over the vocabulary */
+async function computeDist(text){
+  const enc = await tokenizer(text);
+  const out = await model(enc);
+  const logits = out.logits;                 // Tensor [1, seq, vocab]
+  const [, seq, vocab] = logits.dims;
+  const data = logits.data;                  // Float32Array
+  const row = data.subarray((seq-1)*vocab, seq*vocab);
+  const T = Math.max(0.05, +$('temp').value);
+
+  let max = -Infinity;
+  for (let i=0;i<vocab;i++){ const v = row[i]/T; if (v>max) max=v; }
+  const exps = new Float64Array(vocab); let sum = 0;
+  for (let i=0;i<vocab;i++){ const e = Math.exp(row[i]/T - max); exps[i]=e; sum+=e; }
+
+  const idx = Array.from({length:vocab}, (_,i)=>i).sort((a,b)=>exps[b]-exps[a]).slice(0,K);
+  const top = idx.map(i => ({ id:i, p:exps[i]/sum, piece: tokenizer.decode([i]) }));
+  return { top, exps, sum, seq };
+}
+
+function sampleIndex(exps, sum){
+  let r = Math.random()*sum, acc=0;
+  for (let i=0;i<exps.length;i++){ acc += exps[i]; if (acc>=r) return i; }
+  return exps.length-1;
+}
+
+/* ---------- render prediction ---------- */
+function renderCandidates(d){
+  const host = $('cands');
+  const maxP = d.top[0].p || 1;
+  host.innerHTML = d.top.map((c,i) => `
+    <button class="cand ${i===0?'top':''}" data-piece="${encodeURIComponent(c.piece)}" data-p="${c.p}">
+      <span class="ctok">${showSpaces(c.piece) || '\u2205'}</span>
+      <span class="bar"><i style="width:${Math.max(3,(c.p/maxP)*100)}%"></i></span>
+      <span class="cp">${(c.p*100).toFixed(1)}%</span>
+      <span class="add">+ add</span>
+    </button>`).join('');
+  $('tokLine').innerHTML = `The model read <b>${d.seq}</b> token${d.seq!==1?'s':''} and is now guessing token #${d.seq+1}. These ten are the peak of a list <b>${(50257).toLocaleString()}</b> tokens long.`;
+  const ins = $('insightSlot');
+  const conf = d.top[0].p;
+  let msg;
+  if (conf > 0.6) msg = `The model is <b>fairly confident</b> here, one token takes most of the probability, so greedy and sampled output will look almost the same.`;
+  else if (conf < 0.15) msg = `No token stands out, the model is <b>basically guessing</b>, spreading its bet across many options. Sampling will roam; greedy will pick a barely-preferred favourite.`;
+  else msg = `A handful of tokens share the probability. This is the normal case: several plausible continuations, no single obvious one.`;
+  ins.innerHTML = msg; ins.style.display = '';
+}
+
+/* ---------- actions ---------- */
+async function predict(){
+  renderRunning();
+  const text = currentText();
+  if (!text.trim()){ $('cands').innerHTML = '<p class="empty">Type a prompt above to begin.</p>'; return; }
+  const ok = await ensureModel(); if (!ok){ $('cands').innerHTML = '<p class="empty">The model downloads on first use. Open this in a browser tab with internet, then press Predict again.</p>'; return; }
+  setBusy(true);
+  try{
+    renderCandidates(await computeDist(text));
+  }catch(e){
+    console.error(e);
+    $('cands').innerHTML = '<p class="empty">Something went wrong running the model. Try reloading the page.</p>';
+  }
+  setBusy(false);
+}
+
+async function step(useSample){
+  const ok = await ensureModel(); if (!ok) return;
+  setBusy(true);
+  try{
+    const d = await computeDist(currentText());
+    const id = useSample ? sampleIndex(d.exps, d.sum) : d.top[0].id;
+    generated.push({ piece: tokenizer.decode([id]), p: d.exps[id]/d.sum });
+    renderRunning();
+    renderCandidates(await computeDist(currentText()));
+  }catch(e){ console.error(e); }
+  setBusy(false);
+}
+
+async function autowrite(n){
+  const ok = await ensureModel(); if (!ok) return;
+  setBusy(true);
+  try{
+    for (let k=0;k<n;k++){
+      const d = await computeDist(currentText());
+      const id = sampleIndex(d.exps, d.sum);
+      generated.push({ piece: tokenizer.decode([id]), p: d.exps[id]/d.sum });
+      renderRunning();
+      await new Promise(r => setTimeout(r, 20));
+    }
+    renderCandidates(await computeDist(currentText()));
+  }catch(e){ console.error(e); }
+  setBusy(false);
+}
+
+/* clicking a candidate appends it */
+$('cands').addEventListener('click', e => {
+  const b = e.target.closest('.cand'); if (!b || busy) return;
+  generated.push({ piece: decodeURIComponent(b.dataset.piece), p: +b.dataset.p });
+  renderRunning();
+  predict();
+});
+
+/* ---------- wiring ---------- */
+$('predict').addEventListener('click', predict);
+$('addTop').addEventListener('click', () => step(false));
+$('addSample').addEventListener('click', () => step(true));
+$('write').addEventListener('click', () => autowrite(15));
+$('reset').addEventListener('click', () => { generated = []; renderRunning(); if (modelState==='ready') predict(); else $('cands').innerHTML = '<p class="empty">Press <b>Predict next token</b> to load the model and see its guess.</p>'; });
+$('temp').addEventListener('input', e => { $('tempVal').textContent = (+e.target.value).toFixed(1); if (modelState==='ready' && !busy) predict(); });
+promptEl.addEventListener('input', () => {
+  generated = [];
+  renderPromptToks(); renderRunning();
+  if (modelState === 'ready'){ clearTimeout(debounce); debounce = setTimeout(predict, 350); }
+});
+
+renderPresets();
+renderRunning();
+ensureTokenizer();   // load just the tokenizer up front so tokens appear as you type
+</script>
+</body>
+</html>

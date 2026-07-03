@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG &amp; LLMs, practical demos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBFCFE;
+    --ink:#16202C;
+    --ink-soft:#566173;
+    --line:#E1E6EE;
+    --card:#FFFFFF;
+    --signal:#0E8C92;
+    --signal-deep:#0A6266;
+    --signal-wash:#E4F4F4;
+    --morning:#B8641A;
+    --morning-wash:#FBEEDD;
+    --morning-edge:#E9C79B;
+    --shadow:0 1px 2px rgba(22,32,44,.05), 0 6px 22px rgba(22,32,44,.06);
+    --shadow-lift:0 2px 4px rgba(22,32,44,.06), 0 14px 40px rgba(22,32,44,.10);
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    line-height:1.55; font-size:17px;
+    background-image:radial-gradient(var(--line) 1px, transparent 1px);
+    background-size:26px 26px; background-position:-13px -13px;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding:56px 22px 96px}
+
+  header.top{margin-bottom:38px}
+  .kicker{font-family:"IBM Plex Mono",monospace; font-size:13px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--signal-deep); margin:0 0 12px}
+  h1{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:clamp(32px,5.4vw,52px);
+    line-height:1.03; letter-spacing:-.02em; margin:0 0 14px}
+  h1 .sig{color:var(--signal)}
+  .lede{font-size:18.5px; color:var(--ink-soft); max-width:60ch; margin:0}
+  .lede b{color:var(--ink); font-weight:600}
+
+  .grid{display:flex; flex-direction:column; gap:16px; margin-top:34px}
+
+  a.demo{display:flex; gap:20px; align-items:flex-start; text-decoration:none; color:inherit;
+    background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    box-shadow:var(--shadow); padding:22px 24px;
+    transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease}
+  a.demo:hover{transform:translateY(-2px); box-shadow:var(--shadow-lift); border-color:#C9D4E4}
+  a.demo:focus-visible{outline:2.5px solid var(--signal); outline-offset:3px}
+
+  .num{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:16px; color:#fff;
+    background:var(--ink); width:38px; height:38px; flex:0 0 38px; border-radius:10px;
+    display:grid; place-items:center; line-height:1; margin-top:2px}
+  .demo-body{flex:1 1 auto; min-width:0}
+  .demo-title{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:20px;
+    letter-spacing:-.01em; margin:0 0 4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .demo-desc{color:var(--ink-soft); font-size:15.5px; margin:0}
+  .arrow{margin-left:auto; align-self:center; font-family:"Space Grotesk",sans-serif; font-weight:600;
+    color:var(--signal); font-size:15px; white-space:nowrap; flex:0 0 auto}
+  .tags{margin-top:9px; display:flex; flex-wrap:wrap; gap:6px}
+  .tag{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.04em;
+    background:var(--signal-wash); color:var(--signal-deep); border:1px solid #BFE3E3;
+    padding:3px 8px; border-radius:6px}
+
+  /* placeholder card, not yet a link */
+  .demo.soon{cursor:default; box-shadow:none; background:#FAFBFD; border-style:dashed}
+  .demo.soon:hover{transform:none; box-shadow:none; border-color:var(--line)}
+  .demo.soon .num{background:#C3CCDA}
+  .demo.soon .demo-title{color:var(--ink-soft)}
+  .badge-soon{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--ink-soft); background:#EEF2F7; border:1px solid var(--line);
+    padding:2px 8px; border-radius:999px}
+
+  .session{display:flex; align-items:center; gap:10px; margin:26px 2px 2px;
+    font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-soft)}
+  .session::after{content:""; flex:1 1 auto; height:1px; background:var(--line)}
+  .session.am{color:var(--morning)}
+  .session.pm{color:var(--signal-deep)}
+
+  footer{margin-top:40px; font-size:13.5px; color:var(--ink-soft); text-align:center; line-height:1.7}
+  footer code{background:#EEF2F7; padding:2px 6px; border-radius:5px; font-size:12.5px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <p class="kicker">A hands-on practical · vision, language &amp; retrieval</p>
+    <h1>How machines <span class="sig">see, predict,</span><br>and retrieve</h1>
+    <p class="lede">Four self-contained demos for a one-day session: image recognition in the morning, language models and retrieval in the afternoon. Everything runs in your browser, <b>no login, no API keys, no data leaves the tab</b>. Open them in order, or jump straight to the one you need.</p>
+  </header>
+
+  <div class="grid">
+
+    <p class="session am">Morning · seeing</p>
+
+    <!-- DEMO 1, image recognition (morning) -->
+    <a class="demo" href="image-classifier.html">
+      <span class="num">1</span>
+      <div class="demo-body">
+        <p class="demo-title">Image Classifier</p>
+        <p class="demo-desc">Show a real convolutional network (ResNet-50) a photo, a balloon, an airliner, a geyser, an aurora, Earth from space, and watch it turn the pixels into a ranked spread of probabilities over its 1,000 everyday labels. It nails the ordinary objects but has no word for the atmospheric-science scenes it never trained on. Blur, rotate, greyscale or pixelate the image, or drop in your own, and see the guess move.</p>
+        <div class="tags"><span class="tag">CNN</span><span class="tag">pixels → labels</span><span class="tag">probabilities</span><span class="tag">what a model wasn't trained on</span></div>
+      </div>
+      <span class="arrow">Open →</span>
+    </a>
+
+    <!-- DEMO 2, convolution playground (morning) -->
+    <a class="demo" href="convolution.html">
+      <span class="num">2</span>
+      <div class="demo-body">
+        <p class="demo-title">Build a Filter by Hand</p>
+        <p class="demo-desc">Open up the classifier: a CNN is built from one operation, sliding a small grid of numbers (a filter) over the image. Edit the nine numbers and the actual JavaScript convolution loop, and watch the feature map light up on edges, textures and blurs. The equivalent NumPy Python is shown alongside. A hands-on coding exercise, no model needed.</p>
+        <div class="tags"><span class="tag">convolution</span><span class="tag">filters</span><span class="tag">feature maps</span><span class="tag">editable code</span></div>
+      </div>
+      <span class="arrow">Open →</span>
+    </a>
+
+    <p class="session pm">Afternoon · language &amp; retrieval</p>
+
+    <!-- DEMO 3, live -->
+    <a class="demo" href="next-word.html">
+      <span class="num">3</span>
+      <div class="demo-body">
+        <p class="demo-title">Next-Token Predictor</p>
+        <p class="demo-desc">Type a few words and watch a real small language model (distilGPT-2) predict what comes next as a spread of probabilities. Adjust the temperature, sample, and let it write one token at a time.</p>
+        <div class="tags"><span class="tag">tokens</span><span class="tag">probabilities</span><span class="tag">temperature</span><span class="tag">autoregression</span></div>
+      </div>
+      <span class="arrow">Open →</span>
+    </a>
+
+    <!-- DEMO 4, live -->
+    <a class="demo" href="rag-playground.html">
+      <span class="num">4</span>
+      <div class="demo-body">
+        <p class="demo-title">RAG Playground</p>
+        <p class="demo-desc">Split a document into chunks, then ask a question and watch a system retrieve the right passages, by keyword, by meaning, and across a metadata-tagged repository. Includes a live token inspector.</p>
+        <div class="tags"><span class="tag">chunking</span><span class="tag">tokens</span><span class="tag">keyword vs semantic</span><span class="tag">metadata search</span></div>
+      </div>
+      <span class="arrow">Open →</span>
+    </a>
+
+  </div>
+
+  <footer>
+    <a href="worksheet.html" style="color:var(--signal-deep); font-weight:600">Printable morning worksheet →</a><br>
+    Built for teaching · works on any laptop · host it free on GitHub Pages.<br>
+    Each demo is a single self-contained <code>.html</code> file.
+  </footer>
+</div>
+</body>
+</html>
